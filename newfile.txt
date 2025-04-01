@@ -1,1 +1,79 @@
-created from git branch1
+import cv2
+import numpy as np
+import face_recognition
+import os
+import pandas as pd
+from datetime import datetime
+
+# Path to images of known people
+IMAGE_PATH = "images"  # Create a folder with known faces
+
+# Load images and encode faces
+def load_known_faces():
+    known_encodings = []
+    known_names = []
+    
+    for file in os.listdir(IMAGE_PATH):
+        if file.endswith(('.jpg', '.png', '.jpeg')):
+            img = face_recognition.load_image_file(os.path.join(IMAGE_PATH, file))
+            encoding = face_recognition.face_encodings(img)
+            if encoding:
+                known_encodings.append(encoding[0])
+                known_names.append(os.path.splitext(file)[0])  # Remove file extension
+    return known_encodings, known_names
+
+# Mark attendance in CSV
+def mark_attendance(name):
+    filename = "attendance.csv"
+    now = datetime.now()
+    time_string = now.strftime('%Y-%m-%d %H:%M:%S')
+
+    # Load existing attendance data
+    if os.path.exists(filename):
+        df = pd.read_csv(filename)
+    else:
+        df = pd.DataFrame(columns=["Name", "Time"])
+
+    # Check if name already marked
+    if not ((df["Name"] == name) & (df["Time"].str.startswith(now.strftime('%Y-%m-%d')))).any():
+        df.loc[len(df)] = [name, time_string]
+        df.to_csv(filename, index=False)
+
+# Load known faces
+known_face_encodings, known_face_names = load_known_faces()
+
+# Initialize webcam
+cap = cv2.VideoCapture(0)
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)  # Reduce size for faster processing
+    rgb_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+
+    face_locations = face_recognition.face_locations(rgb_frame)
+    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+
+    for face_encoding, face_loc in zip(face_encodings, face_locations):
+        matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
+        name = "Unknown"
+
+        if True in matches:
+            match_index = matches.index(True)
+            name = known_face_names[match_index]
+            mark_attendance(name)
+
+        # Draw rectangle around face
+        top, right, bottom, left = [v * 4 for v in face_loc]
+        cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+        cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+    cv2.imshow("Attendance System", frame)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
